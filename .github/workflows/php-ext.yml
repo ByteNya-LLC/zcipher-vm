@@ -1,0 +1,75 @@
+name: Build PHP extension
+
+on:
+  push:
+    paths:
+      - 'php-ext/**'
+      - 'hydra_stream.h'
+      - '.github/workflows/php-ext.yml'
+  pull_request:
+    paths:
+      - 'php-ext/**'
+      - 'hydra_stream.h'
+      - '.github/workflows/php-ext.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: PHP ${{ matrix.php }}
+    runs-on: ubuntu-latest
+
+    # Build inside the official PHP image, exactly like build-docker.sh does.
+    container:
+      image: php:${{ matrix.php }}-cli
+
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.0', '8.4']
+
+    steps:
+      - name: Install build dependencies
+        run: |
+          apt-get update -qq
+          # $PHPIZE_DEPS = compiler toolchain; git is needed by actions/checkout.
+          apt-get install -y -qq $PHPIZE_DEPS git ca-certificates
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: phpize
+        working-directory: php-ext
+        run: phpize
+
+      - name: configure
+        working-directory: php-ext
+        run: ./configure --enable-hydra-stream
+
+      - name: make
+        working-directory: php-ext
+        run: make -j"$(nproc)"
+
+      - name: Run test suite
+        working-directory: php-ext
+        env:
+          NO_INTERACTION: '1'
+          REPORT_EXIT_STATUS: '1'
+          TEST_PHP_ARGS: '-q'
+        run: make test
+
+      - name: Show extension info
+        working-directory: php-ext
+        run: php -d extension="$PWD/modules/hydra_stream.so" --re hydra_stream
+
+      - name: Stage artifact
+        working-directory: php-ext
+        run: |
+          mkdir -p dist
+          cp modules/hydra_stream.so "dist/hydra_stream-php${{ matrix.php }}.so"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hydra_stream-php${{ matrix.php }}
+          path: php-ext/dist/hydra_stream-php${{ matrix.php }}.so
+          if-no-files-found: error

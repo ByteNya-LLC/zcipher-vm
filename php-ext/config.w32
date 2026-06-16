@@ -1,0 +1,10 @@
+// config.w32 for the hydra_stream extension (Windows / nmake build)
+
+ARG_ENABLE("hydra_stream", "enable HydraStream cipher support", "no");
+
+if (PHP_HYDRA_STREAM != "no") {
+    // hydra_stream_ext.c includes "../hydra_stream.h"; add the parent dir too.
+    ADD_FLAG("CFLAGS_HYDRA_STREAM", "/I " + configure_module_dirname + "\\..");
+    EXTENSION("hydra_stream", "hydra_stream_ext.c");
+    AC_DEFINE("HAVE_HYDRA_STREAM", 1, "Have HydraStream support");
+}

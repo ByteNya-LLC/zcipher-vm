@@ -112,3 +112,10 @@ tasks.register<JavaExec>("checkGo") {
     mainClass.set("com.bytenya.zcipher.compiler.GoEquivalenceCheck")
     dependsOn("generateVmSource", "vetGo")
 }
+
+tasks.register<Exec>("buildPhpExtension") {
+    group = "build"
+    description = "Build the native hydra_stream PHP extension for PHP 8.0 and 8.4 (via Docker)"
+    workingDir = file("php-ext")
+    commandLine("./build-docker.sh")
+}
