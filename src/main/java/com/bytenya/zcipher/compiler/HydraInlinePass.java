@@ -2,32 +2,10 @@ package com.bytenya.zcipher.compiler;
 
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.Type;
-import org.objectweb.asm.tree.AbstractInsnNode;
-import org.objectweb.asm.tree.ClassNode;
-import org.objectweb.asm.tree.IincInsnNode;
-import org.objectweb.asm.tree.InsnList;
-import org.objectweb.asm.tree.JumpInsnNode;
-import org.objectweb.asm.tree.LabelNode;
-import org.objectweb.asm.tree.LookupSwitchInsnNode;
-import org.objectweb.asm.tree.MethodInsnNode;
-import org.objectweb.asm.tree.MethodNode;
-import org.objectweb.asm.tree.TableSwitchInsnNode;
-import org.objectweb.asm.tree.TryCatchBlockNode;
-import org.objectweb.asm.tree.VarInsnNode;
-import org.objectweb.asm.tree.analysis.Analyzer;
-import org.objectweb.asm.tree.analysis.AnalyzerException;
-import org.objectweb.asm.tree.analysis.Frame;
-import org.objectweb.asm.tree.analysis.SourceInterpreter;
-import org.objectweb.asm.tree.analysis.SourceValue;
+import org.objectweb.asm.tree.*;
+import org.objectweb.asm.tree.analysis.*;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.IdentityHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 
 public class HydraInlinePass {
 
@@ -35,6 +13,29 @@ public class HydraInlinePass {
     private static final String STATE_DESC = "Lcom/bytenya/zcipher/HydraStream$State;";
     private static final Set<String> ENTRY_POINT_NAMES = Set.of("hydraInit", "hydraCrypt");
     private static final Set<String> KEEP_NAMES = Set.of("hydraInit", "hydraCrypt", "<init>", "<clinit>");
+
+    private static int remapSlot(int calleeSlot, int slotOffset, boolean shareState, int stateSlot) {
+        if (calleeSlot == 0 && shareState) return stateSlot;
+        return slotOffset + calleeSlot;
+    }
+
+    private static boolean calleeWritesSlotZero(MethodNode callee) {
+        for (AbstractInsnNode insn : callee.instructions.toArray()) {
+            if (insn instanceof VarInsnNode vi
+                    && vi.var == 0
+                    && (vi.getOpcode() == Opcodes.ASTORE
+                    || vi.getOpcode() == Opcodes.ISTORE
+                    || vi.getOpcode() == Opcodes.LSTORE
+                    || vi.getOpcode() == Opcodes.FSTORE
+                    || vi.getOpcode() == Opcodes.DSTORE)) {
+                return true;
+            }
+            if (insn instanceof IincInsnNode ii && ii.var == 0) {
+                return true;
+            }
+        }
+        return false;
+    }
 
     public void transform(ClassNode cn) {
         Map<String, MethodNode> byKey = new HashMap<>();
@@ -293,28 +294,5 @@ public class HydraInlinePass {
                 caller.tryCatchBlocks.add(new TryCatchBlockNode(start, end, handler, tcb.type));
             }
         }
-    }
-
-    private static int remapSlot(int calleeSlot, int slotOffset, boolean shareState, int stateSlot) {
-        if (calleeSlot == 0 && shareState) return stateSlot;
-        return slotOffset + calleeSlot;
-    }
-
-    private static boolean calleeWritesSlotZero(MethodNode callee) {
-        for (AbstractInsnNode insn : callee.instructions.toArray()) {
-            if (insn instanceof VarInsnNode vi
-                    && vi.var == 0
-                    && (vi.getOpcode() == Opcodes.ASTORE
-                            || vi.getOpcode() == Opcodes.ISTORE
-                            || vi.getOpcode() == Opcodes.LSTORE
-                            || vi.getOpcode() == Opcodes.FSTORE
-                            || vi.getOpcode() == Opcodes.DSTORE)) {
-                return true;
-            }
-            if (insn instanceof IincInsnNode ii && ii.var == 0) {
-                return true;
-            }
-        }
-        return false;
     }
 }

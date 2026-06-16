@@ -12,7 +12,7 @@ import java.util.Random;
  */
 public final class VmEquivalenceCheck {
 
-    public static void main(String[] args) {
+    static void main(String[] args) {
         Random rng = new Random(0xC0FFEE);
         int total = 0, failed = 0;
 

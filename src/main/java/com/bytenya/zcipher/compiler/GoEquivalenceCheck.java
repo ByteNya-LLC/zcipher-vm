@@ -17,7 +17,7 @@ import java.util.Random;
  */
 public final class GoEquivalenceCheck {
 
-    public static void main(String[] args) throws Exception {
+    static void main(String[] args) throws Exception {
         Path goFile = Path.of("build", "generated-src", "go", "main.go");
         if (!Files.exists(goFile)) throw new RuntimeException("missing " + goFile);
 
@@ -32,11 +32,13 @@ public final class GoEquivalenceCheck {
         String[] labels = new String[n];
 
         try (BufferedWriter w = new BufferedWriter(
-                     new OutputStreamWriter(p.getOutputStream(), StandardCharsets.UTF_8))) {
+                new OutputStreamWriter(p.getOutputStream(), StandardCharsets.UTF_8))) {
             int idx = 0;
             for (int len : lengths) {
                 byte[] key = new byte[32], nonce = new byte[16], pt = new byte[len];
-                rng.nextBytes(key); rng.nextBytes(nonce); rng.nextBytes(pt);
+                rng.nextBytes(key);
+                rng.nextBytes(nonce);
+                rng.nextBytes(pt);
                 expected[idx] = toHex(reference(key, nonce, pt));
                 labels[idx] = "zero-rng len=" + len;
                 w.write(toHex(key) + "|" + toHex(nonce) + "|" + toHex(pt));
@@ -46,7 +48,9 @@ public final class GoEquivalenceCheck {
             for (int trial = 0; trial < 8; trial++) {
                 int len = 100 + rng.nextInt(3000);
                 byte[] key = new byte[32], nonce = new byte[16], pt = new byte[len];
-                rng.nextBytes(key); rng.nextBytes(nonce); rng.nextBytes(pt);
+                rng.nextBytes(key);
+                rng.nextBytes(nonce);
+                rng.nextBytes(pt);
                 expected[idx] = toHex(reference(key, nonce, pt));
                 labels[idx] = "rand trial=" + trial + " len=" + len;
                 w.write(toHex(key) + "|" + toHex(nonce) + "|" + toHex(pt));
@@ -57,7 +61,7 @@ public final class GoEquivalenceCheck {
 
         int total = 0, failed = 0;
         try (BufferedReader r = new BufferedReader(
-                     new InputStreamReader(p.getInputStream(), StandardCharsets.UTF_8))) {
+                new InputStreamReader(p.getInputStream(), StandardCharsets.UTF_8))) {
             for (int i = 0; i < expected.length; i++) {
                 String got = r.readLine();
                 boolean ok = expected[i].equals(got);
@@ -72,7 +76,7 @@ public final class GoEquivalenceCheck {
         }
 
         try (BufferedReader er = new BufferedReader(
-                     new InputStreamReader(p.getErrorStream(), StandardCharsets.UTF_8))) {
+                new InputStreamReader(p.getErrorStream(), StandardCharsets.UTF_8))) {
             String line;
             while ((line = er.readLine()) != null) System.err.println("[go] " + line);
         }

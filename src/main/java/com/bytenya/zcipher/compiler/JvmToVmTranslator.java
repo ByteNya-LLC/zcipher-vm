@@ -3,28 +3,10 @@ package com.bytenya.zcipher.compiler;
 import com.bytenya.zcipher.vm.MemoryLayout;
 import com.bytenya.zcipher.vm.VmAssembler;
 import com.bytenya.zcipher.vm.VmAssembler.Label;
-
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.Type;
-import org.objectweb.asm.tree.AbstractInsnNode;
-import org.objectweb.asm.tree.ClassNode;
-import org.objectweb.asm.tree.FieldInsnNode;
-import org.objectweb.asm.tree.IincInsnNode;
-import org.objectweb.asm.tree.InsnNode;
-import org.objectweb.asm.tree.IntInsnNode;
-import org.objectweb.asm.tree.JumpInsnNode;
-import org.objectweb.asm.tree.LabelNode;
-import org.objectweb.asm.tree.LdcInsnNode;
-import org.objectweb.asm.tree.LookupSwitchInsnNode;
-import org.objectweb.asm.tree.MethodInsnNode;
-import org.objectweb.asm.tree.MethodNode;
-import org.objectweb.asm.tree.TableSwitchInsnNode;
-import org.objectweb.asm.tree.VarInsnNode;
-import org.objectweb.asm.tree.analysis.Analyzer;
-import org.objectweb.asm.tree.analysis.AnalyzerException;
-import org.objectweb.asm.tree.analysis.Frame;
-import org.objectweb.asm.tree.analysis.SourceInterpreter;
-import org.objectweb.asm.tree.analysis.SourceValue;
+import org.objectweb.asm.tree.*;
+import org.objectweb.asm.tree.analysis.*;
 
 import java.util.ArrayList;
 import java.util.IdentityHashMap;
@@ -51,49 +33,32 @@ public final class JvmToVmTranslator {
 
     public static final String HYDRA_OWNER = "com/bytenya/zcipher/HydraStream";
     public static final String STATE_OWNER = "com/bytenya/zcipher/HydraStream$State";
-
-    public static final class CompiledMethod {
-        public final String name;
-        public final String desc;
-        public final byte[] bytecode;
-        public final int scratchSize;
-        public final int regCount;
-        public final int argRegs;
-
-        public CompiledMethod(String name, String desc, byte[] code,
-                              int scratchSize, int regCount, int argRegs) {
-            this.name = name;
-            this.desc = desc;
-            this.bytecode = code;
-            this.scratchSize = scratchSize;
-            this.regCount = regCount;
-            this.argRegs = argRegs;
-        }
-    }
-
     private final ClassNode cn;
     private final MethodNode m;
     private final VmAssembler asm = new VmAssembler();
-
     private final int maxLocals;
     private final int stackBase;
     private final int tempBase;
-
-    /** Sizes of items on the simulated VM stack (1 = cat-1, 2 = cat-2/long). */
+    /**
+     * Sizes of items on the simulated VM stack (1 = cat-1, 2 = cat-2/long).
+     */
     private final List<Integer> stackSizes = new ArrayList<>();
-
-    /** State at each label (saved when first jumped-to or when fall-through reaches it). */
+    /**
+     * State at each label (saved when first jumped-to or when fall-through reaches it).
+     */
     private final Map<LabelNode, List<Integer>> stackAtLabel = new IdentityHashMap<>();
     private final Map<LabelNode, Label> labelMap = new IdentityHashMap<>();
-
-    /** Scratch offset (relative to scratch base register) for each NEWARRAY site. */
+    /**
+     * Scratch offset (relative to scratch base register) for each NEWARRAY site.
+     */
     private final Map<AbstractInsnNode, Integer> scratchOffsets = new IdentityHashMap<>();
+    private final Frame<SourceValue>[] sourceFrames;
     private int scratchSize = 0;
 
-    /** Whether current PC is reachable. Goes false after GOTO/RETURN/throw, true at next label. */
+    /**
+     * Whether current PC is reachable. Goes false after GOTO/RETURN/throw, true at next label.
+     */
     private boolean reachable = true;
-
-    private final Frame<SourceValue>[] sourceFrames;
 
     @SuppressWarnings({"unchecked", "rawtypes"})
     public JvmToVmTranslator(ClassNode cn, MethodNode m) {
@@ -111,7 +76,31 @@ public final class JvmToVmTranslator {
         }
     }
 
+    private static int stateFieldOffset(String name) {
+        return switch (name) {
+            case "lane" -> MemoryLayout.OFF_LANE;
+            case "feedback" -> MemoryLayout.OFF_FEEDBACK;
+            case "selector" -> MemoryLayout.OFF_SELECTOR;
+            case "roundKey" -> MemoryLayout.OFF_ROUNDKEY;
+            case "mixAcc" -> MemoryLayout.OFF_MIXACC;
+            case "counter" -> MemoryLayout.OFF_COUNTER;
+            case "key" -> MemoryLayout.OFF_KEY;
+            case "nonce" -> MemoryLayout.OFF_NONCE;
+            default -> throw new IllegalArgumentException("unknown State field " + name);
+        };
+    }
+
     /* ── public entry point ── */
+
+    private static int elemBytes(int newarrayOperand) {
+        return switch (newarrayOperand) {
+            case Opcodes.T_BYTE, Opcodes.T_BOOLEAN -> 1;
+            case Opcodes.T_SHORT, Opcodes.T_CHAR -> 2;
+            case Opcodes.T_INT, Opcodes.T_FLOAT -> 4;
+            case Opcodes.T_LONG, Opcodes.T_DOUBLE -> 8;
+            default -> throw new IllegalArgumentException("newarray type " + newarrayOperand);
+        };
+    }
 
     public CompiledMethod translate() {
         // First pass: assign each NEWARRAY site a scratch byte-offset.
@@ -141,6 +130,8 @@ public final class JvmToVmTranslator {
         return new CompiledMethod(m.name, m.desc, asm.toBytecode(), scratchSize, regCount, argRegs);
     }
 
+    /* ── stack helpers (depth-indexed register IDs) ── */
+
     private int methodArgRegCount() {
         Type[] args = Type.getArgumentTypes(m.desc);
         int slots = 0;
@@ -149,36 +140,59 @@ public final class JvmToVmTranslator {
         return slots;
     }
 
-    /* ── stack helpers (depth-indexed register IDs) ── */
+    private int regAtDepth(int depth) {
+        return stackBase + depth;
+    }
 
-    private int regAtDepth(int depth) { return stackBase + depth; }
-    private int curDepth() { return stackSizes.size(); }
+    private int curDepth() {
+        return stackSizes.size();
+    }
 
     private int push(int sz) {
         int r = regAtDepth(curDepth());
         stackSizes.add(sz);
         return r;
     }
-    private int push() { return push(1); }
-    private int pushLong() { return push(2); }
+
+    private int push() {
+        return push(1);
+    }
+
+    private int pushLong() {
+        return push(2);
+    }
 
     private int pop() {
         stackSizes.remove(stackSizes.size() - 1);
         return regAtDepth(curDepth());
     }
-    private int peek() { return regAtDepth(curDepth() - 1); }
-    private int peekSize() { return stackSizes.get(stackSizes.size() - 1); }
+
+    private int peek() {
+        return regAtDepth(curDepth() - 1);
+    }
+
+    private int peekSize() {
+        return stackSizes.get(stackSizes.size() - 1);
+    }
 
     /* temporaries: a few fixed registers above the stack */
-    private int tmp0() { return tempBase; }
-    private int tmp1() { return tempBase + 1; }
-    private int tmp2() { return tempBase + 2; }
+    private int tmp0() {
+        return tempBase;
+    }
+
+    private int tmp1() {
+        return tempBase + 1;
+    }
+
+    private int tmp2() {
+        return tempBase + 2;
+    }
+
+    /* ── per-instruction translation ── */
 
     private Label vmLabel(LabelNode ln) {
         return labelMap.computeIfAbsent(ln, k -> asm.newLabel());
     }
-
-    /* ── per-instruction translation ── */
 
     private void translateInsn(AbstractInsnNode insn) {
         if (insn instanceof LabelNode ln) {
@@ -204,7 +218,11 @@ public final class JvmToVmTranslator {
         int op = insn.getOpcode();
         switch (op) {
             /* ── constants ── */
-            case Opcodes.ACONST_NULL: { int r = push();  asm.emit_ldi(r, 0); break; }
+            case Opcodes.ACONST_NULL: {
+                int r = push();
+                asm.emit_ldi(r, 0);
+                break;
+            }
             case Opcodes.ICONST_M1:
             case Opcodes.ICONST_0:
             case Opcodes.ICONST_1:
@@ -234,9 +252,11 @@ public final class JvmToVmTranslator {
             case Opcodes.LDC: {
                 Object cst = ((LdcInsnNode) insn).cst;
                 if (cst instanceof Integer i) {
-                    int r = push(); asm.emit_ldi(r, i);
+                    int r = push();
+                    asm.emit_ldi(r, i);
                 } else if (cst instanceof Long l) {
-                    int r = pushLong(); asm.emit_ldiq(r, l);
+                    int r = pushLong();
+                    asm.emit_ldiq(r, l);
                 } else {
                     throw new UnsupportedOperationException("LDC " + cst.getClass());
                 }
@@ -280,15 +300,33 @@ public final class JvmToVmTranslator {
             }
 
             /* ── 32-bit arithmetic ── */
-            case Opcodes.IADD: alu32(Opcodes.IADD); break;
-            case Opcodes.ISUB: alu32(Opcodes.ISUB); break;
-            case Opcodes.IMUL: alu32(Opcodes.IMUL); break;
-            case Opcodes.IREM: alu32(Opcodes.IREM); break;
-            case Opcodes.IAND: alu32(Opcodes.IAND); break;
-            case Opcodes.IOR : alu32(Opcodes.IOR);  break;
-            case Opcodes.IXOR: alu32(Opcodes.IXOR); break;
-            case Opcodes.ISHL: alu32(Opcodes.ISHL); break;
-            case Opcodes.IUSHR: alu32(Opcodes.IUSHR); break;
+            case Opcodes.IADD:
+                alu32(Opcodes.IADD);
+                break;
+            case Opcodes.ISUB:
+                alu32(Opcodes.ISUB);
+                break;
+            case Opcodes.IMUL:
+                alu32(Opcodes.IMUL);
+                break;
+            case Opcodes.IREM:
+                alu32(Opcodes.IREM);
+                break;
+            case Opcodes.IAND:
+                alu32(Opcodes.IAND);
+                break;
+            case Opcodes.IOR:
+                alu32(Opcodes.IOR);
+                break;
+            case Opcodes.IXOR:
+                alu32(Opcodes.IXOR);
+                break;
+            case Opcodes.ISHL:
+                alu32(Opcodes.ISHL);
+                break;
+            case Opcodes.IUSHR:
+                alu32(Opcodes.IUSHR);
+                break;
             case Opcodes.INEG: {
                 int s = pop();
                 int d = push();
@@ -299,20 +337,56 @@ public final class JvmToVmTranslator {
             }
 
             /* ── 64-bit arithmetic ── */
-            case Opcodes.LADD: { int b = pop(); int a = pop(); int d = pushLong(); asm.emit_add64(d, a, b); break; }
-            case Opcodes.LMUL: { int b = pop(); int a = pop(); int d = pushLong(); asm.emit_mul64(d, a, b); break; }
-            case Opcodes.LXOR: { int b = pop(); int a = pop(); int d = pushLong(); asm.emit_xor64(d, a, b); break; }
-            case Opcodes.LUSHR: { int b = pop(); int a = pop(); int d = pushLong(); asm.emit_shr64(d, a, b); break; }
+            case Opcodes.LADD: {
+                int b = pop();
+                int a = pop();
+                int d = pushLong();
+                asm.emit_add64(d, a, b);
+                break;
+            }
+            case Opcodes.LMUL: {
+                int b = pop();
+                int a = pop();
+                int d = pushLong();
+                asm.emit_mul64(d, a, b);
+                break;
+            }
+            case Opcodes.LXOR: {
+                int b = pop();
+                int a = pop();
+                int d = pushLong();
+                asm.emit_xor64(d, a, b);
+                break;
+            }
+            case Opcodes.LUSHR: {
+                int b = pop();
+                int a = pop();
+                int d = pushLong();
+                asm.emit_shr64(d, a, b);
+                break;
+            }
 
             /* ── conversions ── */
-            case Opcodes.I2L: { int s = pop(); int d = pushLong(); asm.emit_sext32(d, s); break; }
-            case Opcodes.L2I: { int s = pop(); int d = push();
+            case Opcodes.I2L: {
+                int s = pop();
+                int d = pushLong();
+                asm.emit_sext32(d, s);
+                break;
+            }
+            case Opcodes.L2I: {
+                int s = pop();
+                int d = push();
                 // truncate: keep low 32, zero-extend → 32-bit AND with 0xFFFFFFFF
                 asm.emit_ldi(tmp0(), -1);   // 0xFFFFFFFF
                 asm.emit_and32(d, s, tmp0());
                 break;
             }
-            case Opcodes.I2B: { int s = pop(); int d = push(); asm.emit_sext8(d, s); break; }
+            case Opcodes.I2B: {
+                int s = pop();
+                int d = push();
+                asm.emit_sext8(d, s);
+                break;
+            }
 
             /* ── stack manipulation ── */
             case Opcodes.DUP: {
@@ -331,15 +405,22 @@ public final class JvmToVmTranslator {
                     // duplicate two cat-1 values: [a b] -> [a b a b]
                     int b = regAtDepth(curDepth() - 1);
                     int a = regAtDepth(curDepth() - 2);
-                    int ra = push(); asm.emit_mov(ra, a);
-                    int rb = push(); asm.emit_mov(rb, b);
+                    int ra = push();
+                    asm.emit_mov(ra, a);
+                    int rb = push();
+                    asm.emit_mov(rb, b);
                 }
                 break;
             }
-            case Opcodes.POP: pop(); break;
+            case Opcodes.POP:
+                pop();
+                break;
             case Opcodes.POP2: {
                 if (peekSize() == 2) pop();
-                else { pop(); pop(); }
+                else {
+                    pop();
+                    pop();
+                }
                 break;
             }
 
@@ -350,8 +431,14 @@ public final class JvmToVmTranslator {
                 int dst;
                 int off = stateFieldOffset(fi.name);
                 switch (fi.desc) {
-                    case "I" -> { dst = push(); asm.emit_ldw(dst, ref, off); }
-                    case "J" -> { dst = pushLong(); asm.emit_ldq(dst, ref, off); }
+                    case "I" -> {
+                        dst = push();
+                        asm.emit_ldw(dst, ref, off);
+                    }
+                    case "J" -> {
+                        dst = pushLong();
+                        asm.emit_ldq(dst, ref, off);
+                    }
                     case "[I", "[B" -> {
                         // push (ref + off) as the "array address"
                         dst = push();
@@ -447,37 +534,58 @@ public final class JvmToVmTranslator {
                 reachable = false;
                 break;
             }
-            case Opcodes.IFEQ: { int a = pop(); JumpInsnNode jin = (JumpInsnNode) insn;
-                recordLabelStack(jin.label); asm.emit_jz32(a, vmLabel(jin.label)); break; }
-            case Opcodes.IFNE: { int a = pop(); JumpInsnNode jin = (JumpInsnNode) insn;
-                recordLabelStack(jin.label); asm.emit_jnz32(a, vmLabel(jin.label)); break; }
-            case Opcodes.IFLT: { int a = pop(); JumpInsnNode jin = (JumpInsnNode) insn;
+            case Opcodes.IFEQ: {
+                int a = pop();
+                JumpInsnNode jin = (JumpInsnNode) insn;
+                recordLabelStack(jin.label);
+                asm.emit_jz32(a, vmLabel(jin.label));
+                break;
+            }
+            case Opcodes.IFNE: {
+                int a = pop();
+                JumpInsnNode jin = (JumpInsnNode) insn;
+                recordLabelStack(jin.label);
+                asm.emit_jnz32(a, vmLabel(jin.label));
+                break;
+            }
+            case Opcodes.IFLT: {
+                int a = pop();
+                JumpInsnNode jin = (JumpInsnNode) insn;
                 recordLabelStack(jin.label);
                 asm.emit_ldi(tmp0(), 0);
                 asm.emit_jlt32(a, tmp0(), vmLabel(jin.label));
                 break;
             }
-            case Opcodes.IFGE: { int a = pop(); JumpInsnNode jin = (JumpInsnNode) insn;
+            case Opcodes.IFGE: {
+                int a = pop();
+                JumpInsnNode jin = (JumpInsnNode) insn;
                 recordLabelStack(jin.label);
                 asm.emit_ldi(tmp0(), 0);
                 asm.emit_jge32(a, tmp0(), vmLabel(jin.label));
                 break;
             }
-            case Opcodes.IFGT: { int a = pop(); JumpInsnNode jin = (JumpInsnNode) insn;
+            case Opcodes.IFGT: {
+                int a = pop();
+                JumpInsnNode jin = (JumpInsnNode) insn;
                 recordLabelStack(jin.label);
                 asm.emit_ldi(tmp0(), 0);
                 asm.emit_jgt32(a, tmp0(), vmLabel(jin.label));
                 break;
             }
-            case Opcodes.IFLE: { int a = pop(); JumpInsnNode jin = (JumpInsnNode) insn;
+            case Opcodes.IFLE: {
+                int a = pop();
+                JumpInsnNode jin = (JumpInsnNode) insn;
                 recordLabelStack(jin.label);
                 asm.emit_ldi(tmp0(), 0);
                 asm.emit_jle32(a, tmp0(), vmLabel(jin.label));
                 break;
             }
-            case Opcodes.IF_ICMPEQ: case Opcodes.IF_ICMPNE:
-            case Opcodes.IF_ICMPLT: case Opcodes.IF_ICMPGE:
-            case Opcodes.IF_ICMPGT: case Opcodes.IF_ICMPLE: {
+            case Opcodes.IF_ICMPEQ:
+            case Opcodes.IF_ICMPNE:
+            case Opcodes.IF_ICMPLT:
+            case Opcodes.IF_ICMPGE:
+            case Opcodes.IF_ICMPGT:
+            case Opcodes.IF_ICMPLE: {
                 int b = pop();
                 int a = pop();
                 JumpInsnNode jin = (JumpInsnNode) insn;
@@ -536,6 +644,8 @@ public final class JvmToVmTranslator {
         }
     }
 
+    /* ── helpers ── */
+
     private void alu32(int jvmOp) {
         int b = pop();
         int a = pop();
@@ -546,44 +656,18 @@ public final class JvmToVmTranslator {
             case Opcodes.IMUL -> asm.emit_mul32(d, a, b);
             case Opcodes.IREM -> asm.emit_rem32(d, a, b);
             case Opcodes.IAND -> asm.emit_and32(d, a, b);
-            case Opcodes.IOR  -> asm.emit_or32 (d, a, b);
+            case Opcodes.IOR -> asm.emit_or32(d, a, b);
             case Opcodes.IXOR -> asm.emit_xor32(d, a, b);
             case Opcodes.ISHL -> asm.emit_shl32(d, a, b);
-            case Opcodes.IUSHR-> asm.emit_shr32(d, a, b);
+            case Opcodes.IUSHR -> asm.emit_shr32(d, a, b);
             default -> throw new IllegalArgumentException(Integer.toHexString(jvmOp));
         }
     }
-
-    /* ── helpers ── */
 
     private void recordLabelStack(LabelNode ln) {
         if (!stackAtLabel.containsKey(ln)) {
             stackAtLabel.put(ln, new ArrayList<>(stackSizes));
         }
-    }
-
-    private static int stateFieldOffset(String name) {
-        return switch (name) {
-            case "lane"     -> MemoryLayout.OFF_LANE;
-            case "feedback" -> MemoryLayout.OFF_FEEDBACK;
-            case "selector" -> MemoryLayout.OFF_SELECTOR;
-            case "roundKey" -> MemoryLayout.OFF_ROUNDKEY;
-            case "mixAcc"   -> MemoryLayout.OFF_MIXACC;
-            case "counter"  -> MemoryLayout.OFF_COUNTER;
-            case "key"      -> MemoryLayout.OFF_KEY;
-            case "nonce"    -> MemoryLayout.OFF_NONCE;
-            default -> throw new IllegalArgumentException("unknown State field " + name);
-        };
-    }
-
-    private static int elemBytes(int newarrayOperand) {
-        return switch (newarrayOperand) {
-            case Opcodes.T_BYTE, Opcodes.T_BOOLEAN -> 1;
-            case Opcodes.T_SHORT, Opcodes.T_CHAR -> 2;
-            case Opcodes.T_INT, Opcodes.T_FLOAT  -> 4;
-            case Opcodes.T_LONG, Opcodes.T_DOUBLE-> 8;
-            default -> throw new IllegalArgumentException("newarray type " + newarrayOperand);
-        };
     }
 
     private int newarraySize(AbstractInsnNode insn) {
@@ -628,5 +712,11 @@ public final class JvmToVmTranslator {
         }
     }
 
-    public int totalScratchSize() { return scratchSize; }
+    public int totalScratchSize() {
+        return scratchSize;
+    }
+
+    public record CompiledMethod(String name, String desc, byte[] bytecode, int scratchSize, int regCount,
+                                 int argRegs) {
+    }
 }

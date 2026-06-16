@@ -14,7 +14,7 @@ public class InlineEquivalenceCheck {
     private static final Path INLINED_PATH = Path.of(
             "build", "generated-classes", "com", "bytenya", "zcipher", "HydraStream.class");
 
-    public static void main(String[] args) throws Exception {
+    static void main(String[] args) throws Exception {
         if (!Files.exists(INLINED_PATH)) {
             System.err.println("Inlined class missing at " + INLINED_PATH.toAbsolutePath()
                     + " — run ZCipherCompilerMain first.");
@@ -69,7 +69,8 @@ public class InlineEquivalenceCheck {
             byte[] pt = new byte[len];
             rng.nextBytes(pt);
             total++;
-            if (!compareCase(inlinedInit, inlinedCrypt, key, nonce, pt, "rand trial=" + trial + " len=" + len)) failed++;
+            if (!compareCase(inlinedInit, inlinedCrypt, key, nonce, pt, "rand trial=" + trial + " len=" + len))
+                failed++;
         }
 
         // Case set 3: 1-bit key flip should produce identical-length but completely different ciphertext.
@@ -171,7 +172,6 @@ public class InlineEquivalenceCheck {
         if (a.mixAcc != b.mixAcc) return false;
         if (a.counter != b.counter) return false;
         if (!Arrays.equals(a.key, b.key)) return false;
-        if (!Arrays.equals(a.nonce, b.nonce)) return false;
-        return true;
+        return Arrays.equals(a.nonce, b.nonce);
     }
 }

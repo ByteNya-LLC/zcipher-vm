@@ -13,7 +13,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 public class ZCipherCompilerMain {
-    public static void main(String[] args) throws IOException {
+    static void main(String[] args) throws IOException {
         ClassNode classNode = new ClassNode();
         try (InputStream in = HydraStream.class.getResourceAsStream("HydraStream.class")) {
             if (in == null) {

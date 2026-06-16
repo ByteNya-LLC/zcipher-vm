@@ -17,7 +17,7 @@ public final class Interpreter {
 
     public static void run(byte[] code, long[] regs, byte[] mem) {
         int pc = 0;
-        for (;;) {
+        for (; ; ) {
             int op = code[pc] & 0xFF;
             switch (op) {
                 case Op.MOV: {
@@ -30,7 +30,7 @@ public final class Interpreter {
                 case Op.LDI: {
                     int dst = u16(code, pc + 1);
                     int imm = i32(code, pc + 3);
-                    regs[dst] = (long) imm; // sign-extend
+                    regs[dst] = imm; // sign-extend
                     pc += 7;
                     break;
                 }
@@ -145,13 +145,13 @@ public final class Interpreter {
 
                 case Op.SEXT8: {
                     int d = u16(code, pc + 1), s = u16(code, pc + 3);
-                    regs[d] = (long) (byte) regs[s];
+                    regs[d] = (byte) regs[s];
                     pc += 5;
                     break;
                 }
                 case Op.SEXT32: {
                     int d = u16(code, pc + 1), s = u16(code, pc + 3);
-                    regs[d] = (long) (int) regs[s];
+                    regs[d] = (int) regs[s];
                     pc += 5;
                     break;
                 }
@@ -166,7 +166,7 @@ public final class Interpreter {
                 case Op.LDBS: {
                     int d = u16(code, pc + 1), base = u16(code, pc + 3), off = i16(code, pc + 5);
                     int addr = (int) regs[base] + off;
-                    regs[d] = (long) (byte) mem[addr];
+                    regs[d] = mem[addr];
                     pc += 7;
                     break;
                 }
@@ -209,15 +209,15 @@ public final class Interpreter {
                 case Op.SBOX: {
                     int d = u16(code, pc + 1), w = u16(code, pc + 3), s = u16(code, pc + 5);
                     long word = regs[w];
-                    long sel  = regs[s];
-                    int b0 = (int) ( word         & 0xFF);
-                    int b1 = (int) ((word >>>  8) & 0xFF);
+                    long sel = regs[s];
+                    int b0 = (int) (word & 0xFF);
+                    int b1 = (int) ((word >>> 8) & 0xFF);
                     int b2 = (int) ((word >>> 16) & 0xFF);
                     int b3 = (int) ((word >>> 24) & 0xFF);
-                    int s0 = (int) ( sel         & 0x03);
-                    int s1 = (int) ((sel >>>  2) & 0x03);
-                    int s2 = (int) ((sel >>>  4) & 0x03);
-                    int s3 = (int) ((sel >>>  6) & 0x03);
+                    int s0 = (int) (sel & 0x03);
+                    int s1 = (int) ((sel >>> 2) & 0x03);
+                    int s2 = (int) ((sel >>> 4) & 0x03);
+                    int s3 = (int) ((sel >>> 6) & 0x03);
                     if (s0 == s2) {
                         b0 = sboxByte(mem, (s0 << 8) | sboxByte(mem, (s1 << 8) | b0));
                         b2 = sboxByte(mem, (s2 << 8) | sboxByte(mem, (s3 << 8) | b2));
@@ -245,73 +245,85 @@ public final class Interpreter {
                 case Op.JZ32: {
                     int a = u16(code, pc + 1);
                     int target = i32(code, pc + 3);
-                    if ((int) regs[a] == 0) pc = target; else pc += 7;
+                    if ((int) regs[a] == 0) pc = target;
+                    else pc += 7;
                     break;
                 }
                 case Op.JNZ32: {
                     int a = u16(code, pc + 1);
                     int target = i32(code, pc + 3);
-                    if ((int) regs[a] != 0) pc = target; else pc += 7;
+                    if ((int) regs[a] != 0) pc = target;
+                    else pc += 7;
                     break;
                 }
                 case Op.JEQ32: {
                     int a = u16(code, pc + 1), b = u16(code, pc + 3);
                     int target = i32(code, pc + 5);
-                    if ((int) regs[a] == (int) regs[b]) pc = target; else pc += 9;
+                    if ((int) regs[a] == (int) regs[b]) pc = target;
+                    else pc += 9;
                     break;
                 }
                 case Op.JNE32: {
                     int a = u16(code, pc + 1), b = u16(code, pc + 3);
                     int target = i32(code, pc + 5);
-                    if ((int) regs[a] != (int) regs[b]) pc = target; else pc += 9;
+                    if ((int) regs[a] != (int) regs[b]) pc = target;
+                    else pc += 9;
                     break;
                 }
                 case Op.JLT32: {
                     int a = u16(code, pc + 1), b = u16(code, pc + 3);
                     int target = i32(code, pc + 5);
-                    if ((int) regs[a] <  (int) regs[b]) pc = target; else pc += 9;
+                    if ((int) regs[a] < (int) regs[b]) pc = target;
+                    else pc += 9;
                     break;
                 }
                 case Op.JGE32: {
                     int a = u16(code, pc + 1), b = u16(code, pc + 3);
                     int target = i32(code, pc + 5);
-                    if ((int) regs[a] >= (int) regs[b]) pc = target; else pc += 9;
+                    if ((int) regs[a] >= (int) regs[b]) pc = target;
+                    else pc += 9;
                     break;
                 }
                 case Op.JGT32: {
                     int a = u16(code, pc + 1), b = u16(code, pc + 3);
                     int target = i32(code, pc + 5);
-                    if ((int) regs[a] >  (int) regs[b]) pc = target; else pc += 9;
+                    if ((int) regs[a] > (int) regs[b]) pc = target;
+                    else pc += 9;
                     break;
                 }
                 case Op.JLE32: {
                     int a = u16(code, pc + 1), b = u16(code, pc + 3);
                     int target = i32(code, pc + 5);
-                    if ((int) regs[a] <= (int) regs[b]) pc = target; else pc += 9;
+                    if ((int) regs[a] <= (int) regs[b]) pc = target;
+                    else pc += 9;
                     break;
                 }
                 case Op.JLTU32: {
                     int a = u16(code, pc + 1), b = u16(code, pc + 3);
                     int target = i32(code, pc + 5);
-                    if (Integer.compareUnsigned((int) regs[a], (int) regs[b]) <  0) pc = target; else pc += 9;
+                    if (Integer.compareUnsigned((int) regs[a], (int) regs[b]) < 0) pc = target;
+                    else pc += 9;
                     break;
                 }
                 case Op.JGEU32: {
                     int a = u16(code, pc + 1), b = u16(code, pc + 3);
                     int target = i32(code, pc + 5);
-                    if (Integer.compareUnsigned((int) regs[a], (int) regs[b]) >= 0) pc = target; else pc += 9;
+                    if (Integer.compareUnsigned((int) regs[a], (int) regs[b]) >= 0) pc = target;
+                    else pc += 9;
                     break;
                 }
                 case Op.JGTU32: {
                     int a = u16(code, pc + 1), b = u16(code, pc + 3);
                     int target = i32(code, pc + 5);
-                    if (Integer.compareUnsigned((int) regs[a], (int) regs[b]) >  0) pc = target; else pc += 9;
+                    if (Integer.compareUnsigned((int) regs[a], (int) regs[b]) > 0) pc = target;
+                    else pc += 9;
                     break;
                 }
                 case Op.JLEU32: {
                     int a = u16(code, pc + 1), b = u16(code, pc + 3);
                     int target = i32(code, pc + 5);
-                    if (Integer.compareUnsigned((int) regs[a], (int) regs[b]) <= 0) pc = target; else pc += 9;
+                    if (Integer.compareUnsigned((int) regs[a], (int) regs[b]) <= 0) pc = target;
+                    else pc += 9;
                     break;
                 }
 
@@ -338,10 +350,7 @@ public final class Interpreter {
     }
 
     private static int i32(byte[] a, int off) {
-        return  (a[off    ] & 0xFF)
-              | ((a[off + 1] & 0xFF) <<  8)
-              | ((a[off + 2] & 0xFF) << 16)
-              | ((a[off + 3] & 0xFF) << 24);
+        return (a[off] & 0xFF) | ((a[off + 1] & 0xFF) << 8) | ((a[off + 2] & 0xFF) << 16) | ((a[off + 3] & 0xFF) << 24);
     }
 
     private static long i64(byte[] a, int off) {

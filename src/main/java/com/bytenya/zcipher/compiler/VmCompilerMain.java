@@ -16,7 +16,7 @@ import java.nio.file.Path;
  */
 public final class VmCompilerMain {
 
-    public static void main(String[] args) throws IOException {
+    static void main(String[] args) throws IOException {
         Path inlined = Path.of("build", "generated-classes",
                 "com", "bytenya", "zcipher", "HydraStream.class");
         if (!Files.exists(inlined)) {
@@ -30,13 +30,13 @@ public final class VmCompilerMain {
         Path outDir = Path.of("build", "generated-vm");
         Files.createDirectories(outDir);
 
-        for (String name : new String[] {"hydraInit", "hydraCrypt"}) {
+        for (String name : new String[]{"hydraInit", "hydraCrypt"}) {
             MethodNode m = findMethod(cn, name);
             CompiledMethod cm = new JvmToVmTranslator(cn, m).translate();
             Path outFile = outDir.resolve(name + ".vmb");
-            Files.write(outFile, cm.bytecode);
+            Files.write(outFile, cm.bytecode());
             System.out.printf("%-12s %5d bytes  scratch=%5d  regs=%4d  args=%d%n",
-                    name, cm.bytecode.length, cm.scratchSize, cm.regCount, cm.argRegs);
+                    name, cm.bytecode().length, cm.scratchSize(), cm.regCount(), cm.argRegs());
             System.out.println("           -> " + outFile.toAbsolutePath());
         }
     }

@@ -1,5 +1,9 @@
 package com.bytenya.zcipher.vm;
 
+import com.bytenya.zcipher.HydraStream;
+
+import java.lang.reflect.Field;
+
 /*
  * Fixed addresses inside the VM's flat byte memory.
  *
@@ -16,33 +20,27 @@ package com.bytenya.zcipher.vm;
  * Scratch and I/O bases are passed in via argument registers.
  */
 public final class MemoryLayout {
-    private MemoryLayout() {}
-
-    /* ── state struct (mirrors HydraStream.State field-by-field) ── */
-    public static final int STATE_BASE   = 0;
-    public static final int OFF_LANE     = 0;       // int[32] — 128 bytes
-    public static final int OFF_FEEDBACK = 128;     // int
-    public static final int OFF_SELECTOR = 132;     // int
-    public static final int OFF_ROUNDKEY = 136;     // int
-    public static final int OFF_MIXACC   = 140;     // int
-    public static final int OFF_COUNTER  = 144;     // long (8 bytes)
-    public static final int OFF_KEY      = 152;     // byte[32]
-    public static final int OFF_NONCE    = 184;     // byte[16]
-    public static final int STATE_SIZE   = 200;
-
-    /* ── constant pool ── */
+    public static final int STATE_BASE = 0;
+    public static final int OFF_LANE = 0; // int[32] — 128 bytes
+    public static final int OFF_FEEDBACK = 128; // int
+    public static final int OFF_SELECTOR = 132; // int
+    public static final int OFF_ROUNDKEY = 136; // int
+    public static final int OFF_MIXACC = 140; // int
+    public static final int OFF_COUNTER = 144; // long (8 bytes)
+    public static final int OFF_KEY = 152; // byte[32]
+    public static final int OFF_NONCE = 184; // byte[16]
     public static final int SBOX_BASE = 200;
-    public static final int SBOX_SIZE = 4 * 256 * 4;     // 4096
-    public static final int PHI_BASE  = SBOX_BASE + SBOX_SIZE;   // 4296
-    public static final int PHI_SIZE  = 8 * 4;                   // 32
+    public static final int SBOX_SIZE = 4 * 256 * 4; // 4096
+    public static final int PHI_BASE = SBOX_BASE + SBOX_SIZE; // 4296
+    public static final int PHI_SIZE = 8 * 4; // 32
+    public static final int SCRATCH_BASE = PHI_BASE + PHI_SIZE; // 4328
 
-    /* ── start of per-method scratch region ── */
-    public static final int SCRATCH_BASE = PHI_BASE + PHI_SIZE;  // 4328
+    private MemoryLayout() {
+    }
 
     private static int[] reflectIntField(String name) {
         try {
-            java.lang.reflect.Field f = com.bytenya.zcipher.HydraStream.class
-                    .getDeclaredField(name);
+            Field f = HydraStream.class.getDeclaredField(name);
             f.setAccessible(true);
             return (int[]) f.get(null);
         } catch (ReflectiveOperationException e) {
@@ -50,10 +48,17 @@ public final class MemoryLayout {
         }
     }
 
-    public static int[] hydraSbox() { return reflectIntField("HYDRA_SBOX"); }
-    public static int[] hydraPhi()  { return reflectIntField("HYDRA_PHI"); }
+    public static int[] hydraSbox() {
+        return reflectIntField("HYDRA_SBOX");
+    }
 
-    /** Write the constant pool (sbox + phi) into memory at their fixed offsets. */
+    public static int[] hydraPhi() {
+        return reflectIntField("HYDRA_PHI");
+    }
+
+    /**
+     * Write the constant pool (sbox + phi) into memory at their fixed offsets.
+     */
     public static void writeConstants(byte[] mem) {
         int[] sbox = hydraSbox();
         for (int i = 0; i < sbox.length; i++) {
@@ -66,17 +71,17 @@ public final class MemoryLayout {
     }
 
     public static void writeWord(byte[] mem, int off, int v) {
-        mem[off    ] = (byte)  v;
-        mem[off + 1] = (byte) (v >>>  8);
+        mem[off] = (byte) v;
+        mem[off + 1] = (byte) (v >>> 8);
         mem[off + 2] = (byte) (v >>> 16);
         mem[off + 3] = (byte) (v >>> 24);
     }
 
     public static int readWord(byte[] mem, int off) {
-        return  (mem[off    ] & 0xFF)
-              | ((mem[off + 1] & 0xFF) <<  8)
-              | ((mem[off + 2] & 0xFF) << 16)
-              | ((mem[off + 3] & 0xFF) << 24);
+        return (mem[off] & 0xFF)
+                | ((mem[off + 1] & 0xFF) << 8)
+                | ((mem[off + 2] & 0xFF) << 16)
+                | ((mem[off + 3] & 0xFF) << 24);
     }
 
     public static void writeLong(byte[] mem, int off, long v) {
